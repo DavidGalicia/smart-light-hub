@@ -1,0 +1,15 @@
+{
+  "name": "media-server",
+  "version": "1.0.0",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.16.4",
+    "follow-redirects": "^1.6.0",
+    "ip": "^1.1.5",
+    "lame": "^1.2.4",
+    "python-shell": "^1.0.6",
+    "speaker": "^0.4.1",
+    "stateful-process-command-proxy": "^1.0.1",
+    "ws": "^6.1.2"
+  }
+}
