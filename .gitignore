@@ -1,5 +1,5 @@
-./node_modules
-./www/node_modules
+/node_modules
+/www/node_modules
 
 # Created by https://www.gitignore.io/api/phpstorm
 # Edit at https://www.gitignore.io/?templates=phpstorm

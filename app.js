@@ -5,16 +5,19 @@ let cors = require('cors');
 let url = require('url');
 let querystring = require("querystring");
 let lame = require('lame');
-let Speaker = require('speaker');
+//let Speaker = require('speaker');
 let WebSocket = require('ws');
 let StatefulProcessCommandProxy = require('stateful-process-command-proxy');
 let dgram = require("dgram");
 let ipTools = require('ip');
 let os = require( 'os' );
 
+const HttpPort = 8000;
+const UdpBroadcastPort = 8001;
+
 let PythonShellOptions = {
     mode: 'text',
-    pythonPath: '/usr/bin/python3',
+    pythonPath: 'python',
     args: []
 };
 
@@ -29,7 +32,7 @@ let commandProxy = new StatefulProcessCommandProxy(
             console.log(severity.toUpperCase() + " " +origin+" "+ msg);
         },
 
-        processCommand: '/bin/bash',
+        processCommand: (os.platform() === 'linux') ? '/bin/bash' : 'cmd.exe',
         processArgs:  ['-s'], // read commands from standard input
         processRetainMaxCmdHistory : 10,
 
@@ -59,11 +62,11 @@ function toBase64(str)
 let decoder = null;
 let decoderBytesProcessed = 0;
 let playSongHttpsRequest = null;
-const speaker = new Speaker({
+/*const speaker = new Speaker({
     channels: 2,          // 2 channels
     bitDepth: 16,         // 16-bit samples
     sampleRate: 44100     // 44,100 Hz sample rate
-});
+});*/
 
 let app = express();
 
@@ -138,7 +141,7 @@ app.get('/api/playSong', function(req, res) {
         }
 
         let onDecoderReady = function() {
-            decoder.pipe(speaker);
+            //decoder.pipe(speaker);
 
             let writeChunk = function(chunk) {
                 console.log(chunk);
@@ -191,8 +194,10 @@ app.get('/api/playSong', function(req, res) {
 app.get('/api/broadcastConfig', function(req,res) {
     let networkInterfaces = os.networkInterfaces( );
     let networkBroadcastAddress = "";
-    let udpClientAddress = "";
-    let udpClientPort = 8001;
+    let websocketServerIP = "";
+
+    // our websocket server may have multiple IPs so we
+    // need to guess the best one we'll share with the nodes
     for (let name in networkInterfaces) {
         if (name !== 'lo') {
             let networkInterface = networkInterfaces[name];
@@ -202,31 +207,36 @@ app.get('/api/broadcastConfig', function(req,res) {
                 if ((ipInfo.address !== '127.0.0.1') && (ipInfo.family === 'IPv4')) {
                     let subnetInfo = ipTools.subnet(ipInfo.address, ipInfo.netmask);
                     networkBroadcastAddress = subnetInfo.broadcastAddress;
-                    udpClientAddress = ipInfo.address
+                    websocketServerIP = ipInfo.address
                 }
             }
         }
     }
 
-    let UDPMessage = new Buffer("Please connect to " + udpClientAddress);
-    let UDPClient = dgram.createSocket("udp4");
+    let udpMessage = {
+        ip: websocketServerIP,
+        port: HttpPort,
+        message: "Please setup a websocket connection to the hub."
+    };
+    let udpMessageBuffer = new Buffer(JSON.stringify(udpMessage));
+    let udpClient = dgram.createSocket("udp4");
 
-    UDPClient.on('message', function(message, sender) {
-        UDPClient.close();
+    udpClient.on('message', function(message, sender) {
+        udpClient.close();
     });
 
-    UDPClient.on('listening', function() {
-        UDPClient.setBroadcast(true);
-        UDPClient.send(UDPMessage, 0, UDPMessage.length, udpClientPort  , networkBroadcastAddress);
+    udpClient.on('listening', function() {
+        udpClient.setBroadcast(true);
+        udpClient.send(udpMessageBuffer, 0, udpMessageBuffer.length, UdpBroadcastPort  , networkBroadcastAddress);
     });
 
-    UDPClient.bind(udpClientPort);
+    udpClient.bind(UdpBroadcastPort);
 
     res.end(JSON.stringify({'resource': null, 'status': 'good', 'statusDetails': 'The config has been broadcasted.'}))
 });
 
-server.listen(8000, function() {
-    console.log('Listening on *:8000');
+server.listen(HttpPort, function() {
+    console.log('Listening on *:' + HttpPort);
 });
 
 let wss = new WebSocket.Server({'server': server});
