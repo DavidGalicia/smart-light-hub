@@ -1,5 +1,7 @@
 /node_modules
 /www/node_modules
+/scripts/debug.log
+*.swp
 
 # Created by https://www.gitignore.io/api/phpstorm
 # Edit at https://www.gitignore.io/?templates=phpstorm
