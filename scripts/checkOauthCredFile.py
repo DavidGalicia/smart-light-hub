@@ -1,4 +1,4 @@
-from gmusicapi import Musicmanager
+from gmusicapi import Mobileclient
 import os.path
 import json 
 
@@ -8,9 +8,9 @@ Result = {
     'statusDetails': ''
 }
 
-mm = Musicmanager()
+api = Mobileclient()
 
-if os.path.isfile(mm.OAUTH_FILEPATH):
+if os.path.isfile(api.OAUTH_FILEPATH):
     Result['resource'] = True
     Result['statusDetails'] = 'The file exists.'
 else:

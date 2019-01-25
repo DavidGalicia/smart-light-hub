@@ -1,4 +1,4 @@
-from gmusicapi import Musicmanager
+from gmusicapi import Mobileclient
 from gmusicapi.utils import utils
 from oauth2client.client import OAuth2WebServerFlow
 import oauth2client.file
@@ -15,12 +15,12 @@ Result = {
     'statusDetails': ''
 }
 
-PerformOauthOptions = {} 
+PerformOauthOptions = {}
 
 try:
     PerformOauthOptionsJson = sys.argv[1]
 
-    if ((2 in sys.argv) and (sys.argv[2] == 'base64')):
+    if ((len(sys.argv) >= 2) and (sys.argv[2] == 'base64')):
         PerformOauthOptionsJson = base64.b64decode(PerformOauthOptionsJson)
         
     PerformOauthOptions = json.loads(PerformOauthOptionsJson)
@@ -29,8 +29,8 @@ except Exception:
 
 logging.basicConfig(filename='debug.log',level=logging.WARNING)
 
-mm = Musicmanager()
-oauthInfo = mm._session_class.oauth
+api = Mobileclient()
+oauthInfo = api._session_class.oauth
 flow = OAuth2WebServerFlow(oauthInfo.client_id,
                            oauthInfo.client_secret,
                            oauthInfo.scope,
@@ -45,8 +45,8 @@ if 'code' in PerformOauthOptions:
         print(json.dumps(Result))
         exit()
 
-    storage_filepath = mm.OAUTH_FILEPATH
-    utils.make_sure_path_exists(os.path.dirname(mm.OAUTH_FILEPATH), 0o700)
+    storage_filepath = api.OAUTH_FILEPATH
+    utils.make_sure_path_exists(os.path.dirname(api.OAUTH_FILEPATH), 0o700)
     storage = oauth2client.file.Storage(storage_filepath)
     storage.put(credentials)
 
@@ -54,7 +54,7 @@ if 'code' in PerformOauthOptions:
     Result['statusDetails'] = 'The code has been processed.' 
 else:
     authUri = flow.step1_get_authorize_url()
-    Result['data'] = authUri
+    Result['resource'] = authUri
     Result['status'] = 'good' 
     Result['statusDetails'] = 'Tell the user to copy and paste the url into a browser.' 
 

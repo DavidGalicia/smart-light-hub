@@ -58,12 +58,12 @@ app.get('/api/performOauth', function(req, res) {
     let command = 'performOauth.py';
 
     PythonShell.run(command, options, function(error, cmdResults) {
+        if (error)
+            console.log("Error: " + error);
+
         let joinedCmdResults = cmdResults.join('');
 
         res.end(joinedCmdResults);
-
-        if (error)
-            console.log("Error: " + error);
     });
 });
 

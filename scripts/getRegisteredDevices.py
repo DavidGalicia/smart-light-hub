@@ -25,7 +25,7 @@ api = Mobileclient()
 
 try:
     deviceId = api.FROM_MAC_ADDRESS # anonymous login
-    api.oauth_login(deviceId)
+    api.oauth_login(deviceId, api.OAUTH_FILEPATH)
 except Exception as e:
     Result['status'] = 'bad'
     Result['statusDetails'] = repr(e)
