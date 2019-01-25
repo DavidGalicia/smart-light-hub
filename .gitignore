@@ -1,6 +1,6 @@
 /node_modules
 /www/node_modules
-/scripts/debug.log
+debug.log
 *.swp
 
 # Created by https://www.gitignore.io/api/phpstorm

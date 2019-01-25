@@ -7,52 +7,19 @@ let querystring = require("querystring");
 let lame = require('lame');
 //let Speaker = require('speaker');
 let WebSocket = require('ws');
-let StatefulProcessCommandProxy = require('stateful-process-command-proxy');
 let dgram = require("dgram");
 let ipTools = require('ip');
 let os = require( 'os' );
+let {PythonShell} = require('python-shell');
 
 const HttpPort = 8000;
 const UdpBroadcastPort = 8001;
 
 let PythonShellOptions = {
     mode: 'text',
-    pythonPath: 'python',
-    args: []
+    pythonPath: (os.platform() === 'linux') ? 'python' : 'C:\\Python27\\python.exe',
+    scriptPath: './scripts',
 };
-
-let commandProxy = new StatefulProcessCommandProxy(
-    {
-        name: "media-server-shell",
-        max: 2,
-        min: 1,
-        idleTimeoutMS: 30000,
-
-        logFunction: function(severity,origin,msg) {
-            console.log(severity.toUpperCase() + " " +origin+" "+ msg);
-        },
-
-        processCommand: (os.platform() === 'linux') ? '/bin/bash' : 'cmd.exe',
-        processArgs:  ['-s'], // read commands from standard input
-        processRetainMaxCmdHistory : 10,
-
-        /*processInvalidateOnRegex :
-            {
-                'any':[{regex:'.*error.*',flags:'ig'}],
-                'stdout':[{regex:'.*error.*',flags:'ig'}],
-                'stderr':[{regex:'.*error.*',flags:'ig'}]
-            },*/
-
-        processCwd : './',
-
-        //initCommands: [ 'testInitVar=test' ],
-
-        /*validateFunction: function(processProxy) {
-            return processProxy.isValid();
-        },*/
-
-        preDestroyCommands: [ 'echo This ProcessProxy is being destroyed!' ]
-    });
 
 function toBase64(str)
 {
@@ -78,60 +45,147 @@ app.get(['/', '/#/*'], function(req, res) {
     res.sendFile(__dirname + '/index.html');
 });
 
+app.get('/api/performOauth', function(req, res) {
+    let q = req.query;
+    let args = [toBase64(JSON.stringify(q)), 'base64'];
+    let options = {
+        mode: 'text',
+        pythonPath: PythonShellOptions.pythonPath,
+        scriptPath: PythonShellOptions.scriptPath,
+        args: args
+    };
+
+    let command = 'performOauth.py';
+
+    PythonShell.run(command, options, function(error, cmdResults) {
+        let joinedCmdResults = cmdResults.join('');
+
+        res.end(joinedCmdResults);
+
+        if (error)
+            console.log("Error: " + error);
+    });
+});
+
+app.get('/api/checkOauthCredFile', function(req, res) {
+    let q = req.query;
+    let args = [toBase64(JSON.stringify(q)), 'base64'];
+    let options = {
+        mode: 'text',
+        pythonPath: PythonShellOptions.pythonPath,
+        scriptPath: PythonShellOptions.scriptPath,
+        args: args
+    };
+
+    let command = 'checkOauthCredFile.py';
+
+    PythonShell.run(command, options, function(error, cmdResults) {
+        let joinedCmdResults = cmdResults.join('');
+
+        res.end(joinedCmdResults);
+
+        if (error)
+            console.log("Error: " + error);
+    });
+});
+
 app.get('/api/getRegisteredDevices', function(req, res) {
     let q = req.query;
     let args = [toBase64(JSON.stringify(q)), 'base64'];
+    let options = {
+        mode: 'text',
+        pythonPath: PythonShellOptions.pythonPath,
+        scriptPath: PythonShellOptions.scriptPath,
+        args: args
+    };
 
-    commandProxy.executeCommand(PythonShellOptions.pythonPath + ' scripts/getRegisteredDevices.py ' + args.join(' '))
-        .then(function(cmdResult) {
-            res.end(cmdResult.stdout)
-        }).catch(function(error) {
-        console.log("Error: " + error);
+    let command = "getRegisteredDevices.py";
+
+    PythonShell.run(command, options, function(error, cmdResults) {
+        let joinedCmdResults = cmdResults.join('');
+
+        res.end(joinedCmdResults);
+
+        if (error)
+            console.log("Error: " + error);
     });
 });
 
 app.get('/api/getRegisteredDevice', function(req, res) {
     let q = req.query;
     let args = [toBase64(JSON.stringify(q)), 'base64'];
+    let options = {
+        mode: 'text',
+        pythonPath: PythonShellOptions.pythonPath,
+        scriptPath: PythonShellOptions.scriptPath,
+        args: args
+    };
 
-    commandProxy.executeCommand(PythonShellOptions.pythonPath + ' scripts/getRegisteredDevice.py ' + args.join(' '))
-        .then(function(cmdResult) {
-            if (!cmdResult.stderr.includes("GmusicapiWarning"))
-                throw cmdResult.stderr;
+    let command = 'getRegisteredDevice.py';
 
-            res.end(cmdResult.stdout)
-        }).catch(function(error) {
-            console.log(error);
-        });
+    PythonShell.run(command, options, function(error, cmdResults) {
+        let joinedCmdResults = cmdResults.join('');
+
+        res.end(joinedCmdResults);
+
+        if (error)
+            console.log("Error: " + error);
+    });
 });
 
 app.get('/api/getAllSongs', function(req, res) {
     let q = req.query;
     let args = [toBase64(JSON.stringify(q)), 'base64'];
+    let options = {
+        mode: 'text',
+        pythonPath: PythonShellOptions.pythonPath,
+        scriptPath: PythonShellOptions.scriptPath,
+        args: args
+    };
 
-    commandProxy.executeCommand(PythonShellOptions.pythonPath + ' scripts/getAllSongs.py ' + args.join(' '))
-        .then(function(cmdResult) {
-            res.end(cmdResult.stdout)
-        }).catch(function(error) {
+    let command = 'getAllSongs.py';
+
+    PythonShell.run(command, options, function(error, cmdResults) {
+        let joinedCmdResults = cmdResults.join('');
+
+        res.end(joinedCmdResults);
+
+        if (error)
             console.log("Error: " + error);
-        });
+    });
 });
 
 app.get('/api/getStreamUrl', function(req, res) {
     let q = req.query;
     let args = [toBase64(JSON.stringify(q)), 'base64'];
+    let options = {
+        mode: 'text',
+        pythonPath: PythonShellOptions.pythonPath,
+        scriptPath: PythonShellOptions.scriptPath,
+        args: args
+    };
 
-    commandProxy.executeCommand(PythonShellOptions.pythonPath + ' scripts/getStreamUrl.py ' + args.join(' '))
-        .then(function(cmdResult) {
-            res.end(cmdResult.stdout)
-        }).catch(function(error) {
-        console.log("Error: " + error);
+    let command = 'getStreamUrl.py';
+
+    PythonShell.run(command, options, function(error, cmdResults) {
+        let joinedCmdResults = cmdResults.join('');
+
+        res.end(joinedCmdResults);
+
+        if (error)
+            console.log("Error: " + error);
     });
 });
 
 app.get('/api/playSong', function(req, res) {
     let q = req.query;
     let args = [toBase64(JSON.stringify(q)), 'base64'];
+    let options = {
+        mode: 'text',
+        pythonPath: PythonShellOptions.pythonPath,
+        scriptPath: PythonShellOptions.scriptPath,
+        args: args
+    };
 
     let playSong = function(streamUrl) {
         console.log(streamUrl);
@@ -176,18 +230,19 @@ app.get('/api/playSong', function(req, res) {
         });
     };
 
-    commandProxy.executeCommand(PythonShellOptions.pythonPath + ' scripts/getStreamUrl.py ' + args.join(' '))
-        .then(function(cmdResult) {
-            let outputJson = cmdResult.stdout;
-            res.end(outputJson);
+    let command = 'getStreamUrl.py';
 
-            let output = JSON.parse(outputJson);
+    PythonShell.run(command, options, function(error, cmdResults) {
+        let joinedCmdResults = cmdResults.join('');
 
-            return output.data; // stream url
-        })
-        .then(playSong)
-        .catch(function(error) {
-        console.log("Error: " + error);
+        res.end(joinedCmdResults);
+
+        let output = JSON.parse(joinedCmdResults);
+
+        if (error)
+            console.log("Error: " + error);
+        else
+            playSong(output.data);
     });
 });
 
