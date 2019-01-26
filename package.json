@@ -9,7 +9,6 @@
     "lame": "^1.2.4",
     "python-shell": "^1.0.6",
     "speaker": "^0.4.1",
-    "stateful-process-command-proxy": "^1.0.1",
     "ws": "^6.1.2"
   }
 }
