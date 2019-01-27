@@ -5,35 +5,31 @@ let cors = require('cors');
 let url = require('url');
 let querystring = require("querystring");
 let lame = require('lame');
-//let Speaker = require('speaker');
 let WebSocket = require('ws');
 let dgram = require("dgram");
 let ipTools = require('ip');
 let os = require( 'os' );
+let Throttle = require('throttle');
+let FIFO = require('fifo-buffer');
 let {PythonShell} = require('python-shell');
-
-const HttpPort = 8000;
-const UdpBroadcastPort = 8001;
-
-let PythonShellOptions = {
-    mode: 'text',
-    pythonPath: (os.platform() === 'linux') ? 'python' : 'C:\\Python27\\python.exe',
-    scriptPath: './scripts',
-};
 
 function toBase64(str)
 {
     return Buffer.from(str).toString('base64')
 }
 
-let decoder = null;
-let decoderBytesProcessed = 0;
+const HttpPort = 8000;
+const UdpBroadcastPort = 8001;
+
+let throttle = null;
+let writeChunk = null; // used by throttle
 let playSongHttpsRequest = null;
-/*const speaker = new Speaker({
-    channels: 2,          // 2 channels
-    bitDepth: 16,         // 16-bit samples
-    sampleRate: 44100     // 44,100 Hz sample rate
-});*/
+
+const PythonShellOptions = {
+    mode: 'text',
+    pythonPath: (os.platform() === 'linux') ? 'python' : 'C:\\Python27\\python.exe',
+    scriptPath: './scripts',
+};
 
 let app = express();
 
@@ -187,30 +183,44 @@ app.get('/api/playSong', function(req, res) {
         args: args
     };
 
-    let playSong = function(streamUrl) {
-        console.log(streamUrl);
+    wss.clients.forEach(function each(client) {
+        if (client.readyState === WebSocket.OPEN) {
+            let message = {'type': 'sound','action':'stop'};
+            client.send(JSON.stringify(message));
+        }
+    });
 
-        if (decoder) {
-            decoder.unpipe();
+    let playSong = function(streamUrl) {
+        if (throttle) {
+            throttle.end();
+            throttle.removeListener('data', writeChunk);
         }
 
-        let onDecoderReady = function() {
-            //decoder.pipe(speaker);
+        let chunkSize = 1024*2;
+        let burstSize = chunkSize * 2;
+        throttle = new Throttle({bps:96 /8*1000, chunkSize});
+        let throttleBurstFifo = new FIFO();
 
-            let writeChunk = function(chunk) {
-                console.log(chunk);
-                decoderBytesProcessed += chunk.length;
-            };
+        writeChunk = function(chunk) {
+            if (throttleBurstFifo && (throttleBurstFifo.size < burstSize)) {
+                throttleBurstFifo.enq(chunk);
 
-            decoder.on('data', writeChunk);
+                if (throttleBurstFifo.size >= burstSize) {
+                    chunk = throttleBurstFifo.deq(throttleBurstFifo.size);
+                    throttleBurstFifo = null;
+                } else {
+                    return;
+                }
+            }
 
-            decoder.on('end', () => {
-                console.log(decoderBytesProcessed);
+            wss.clients.forEach(function each(client) {
+                if (client.readyState === WebSocket.OPEN)
+                    client.send(chunk);
             });
         };
 
-        decoder = new lame.Decoder();
-        decoder.on('format', onDecoderReady);
+        throttle.on('data', writeChunk);
+        throttle.on('error', () => {}); // do nothing on error
 
         if (playSongHttpsRequest) {
             playSongHttpsRequest.abort();
@@ -218,10 +228,10 @@ app.get('/api/playSong', function(req, res) {
 
         playSongHttpsRequest = httpsFR.get(streamUrl, (response) => {
             response.on('data', (chunk) => {
-                decoder.write(chunk);
+                throttle.write(chunk);
             });
             response.on('end', () => {
-                decoder.end();
+                throttle.end();
             });
         });
 
@@ -239,10 +249,12 @@ app.get('/api/playSong', function(req, res) {
 
         let output = JSON.parse(joinedCmdResults);
 
+        console.log(output);
+
         if (error)
             console.log("Error: " + error);
         else
-            playSong(output.data);
+            playSong(output.resource);
     });
 });
 
@@ -297,12 +309,12 @@ server.listen(HttpPort, function() {
 let wss = new WebSocket.Server({'server': server});
 
 wss.on('connection', function connection(ws, request) {
-   const urlParts = url.parse(request.url, true);
-   const ip = request.connection.remoteAddress;
+    const urlParts = url.parse(request.url, true);
+    const ip = request.connection.remoteAddress;
 
-   ws.on('message', function incoming(message) {
-       console.log('received: %s', message);
-   });
+    ws.on('message', function incoming(message) {
+        console.log('received: %s', message);
+    });
 
-   ws.send('hello client!');
+    //ws.send('hello client!');
 });

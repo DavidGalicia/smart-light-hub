@@ -26,6 +26,10 @@ api = Mobileclient()
 try:
     if GetOptions and ('deviceId' in GetOptions):
         deviceId = GetOptions['deviceId']
+
+        if "0x" in deviceId:
+            deviceId = deviceId[2:]
+
         api.oauth_login(deviceId)
     else:
         deviceId = api.FROM_MAC_ADDRESS # anonymous login
@@ -38,7 +42,7 @@ except Exception as e:
 
 try:
     if ('songId' in GetOptions):
-        devices = api.get_stream_url(GetOptions['songId'])
+        devices = api.get_stream_url(GetOptions['songId'], None, 'low')
         Result['resource'] = devices
     else:
         Result['status'] = 'bad'

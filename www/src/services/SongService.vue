@@ -15,8 +15,16 @@
                 .catch(function (error) {
                     console.log(error);
                 });
+        },
+        play(deviceId, songId) {
+            return Axios.get('http://127.0.0.1:8000/api/playSong?deviceId=' + deviceId + '&songId=' + songId)
+                .then(function (response) {
+                    return response.data;
+                })
+                .catch(function (error) {
+                    console.log(error);
+                });
         }
-
     }
 </script>
 

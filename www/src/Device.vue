@@ -6,8 +6,9 @@
 
         <h2>Your {{ device.friendlyName }}</h2>
         <h3>Songs</h3>
+        <b-alert variant="danger" :show="playSongResult.status === 'bad'">{{ playSongResult.statusDetails }}</b-alert>
 
-        <b-table striped hover :fields="songsFields" :items="songs">
+        <b-table striped hover :fields="songsFields" :items="songs" @row-clicked="onSongClicked">
             <template slot="album" slot-scope="data">{{ data.value }}</template>
             <template slot="title" slot-scope="data">{{ data.value }}</template>
             <template slot="artist" slot-scope="data">{{ data.value }}</template>
@@ -39,6 +40,12 @@
 
                         this.songs = data.resource
                     });
+            },
+            onSongClicked(song) {
+                SongService.play(this.device.id, song.id)
+                    .then((data) => {
+                        this.playSongResult = data
+                    })
             }
         },
         data() {
@@ -46,7 +53,8 @@
                 device: { friendlyName: ''},
                 songs: [],
                 songsFields: ['album', 'title', 'artist'],
-                isSongsLoading: false
+                isSongsLoading: false,
+                playSongResult: {}
             }
         },
         created() {
