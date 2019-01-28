@@ -1,6 +1,6 @@
 <template>
     <div>
-        <router-link to="/setupAccount">Don't see your device? Click here</router-link>
+        <router-link to="/setupAccount">Can't see your device? Click here</router-link>
         <br>
         <br>
 

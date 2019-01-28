@@ -12,10 +12,12 @@ let os = require( 'os' );
 let Throttle = require('throttle');
 let FIFO = require('fifo-buffer');
 let {PythonShell} = require('python-shell');
+let Analyser = require("audio-analyser");
+let AnalyserWindowFunc = require('window-function/rectangular');
 let db = require('./db');
+let normalColorBlend = require('color-blend').normal;
 
-function toBase64(str)
-{
+function toBase64(str) {
     return Buffer.from(str).toString('base64')
 }
 
@@ -25,6 +27,86 @@ const UdpBroadcastPort = 8001;
 let throttle = null;
 let writeChunk = null; // used by throttle
 let playSongHttpsRequest = null;
+let decoder = null;
+const LightFps = 3; // frames per second
+
+let isDrawProcessed = false;
+let analyser = null;
+let analyserFftSize = 256;
+let analyserFrequencyBinCount = analyserFftSize / 2;
+let rgbColor = [255,0,0]; // start off with red
+let decColor = 0;
+let incColor = decColor + 1;
+let colorValue = 0;
+
+// adapted from:
+// https://gist.github.com/jamesotron/766994#file-rgb_spectrum-c-L22
+function updateRgbColor() {
+    if (decColor < 3) {
+        if (colorValue < 255) {
+            rgbColor[decColor] -= 1;
+            rgbColor[incColor] += 1;
+            colorValue++;
+        } else {
+            colorValue = 0;
+            decColor += 1;
+            incColor = decColor === 2 ? 0 : decColor + 1;
+        }
+    } else {
+        decColor = 0;
+    }
+}
+
+function draw() {
+    if (!isDrawProcessed) {
+        return;
+    }
+    if (!analyser) {
+        return;
+    }
+
+    let frequencyData = new Uint8Array(analyserFrequencyBinCount);
+    analyser.getByteFrequencyData(frequencyData);
+
+    updateRgbColor();
+    const numLedLightsPerStrip = 144;
+    const whiteBackground  = { r: 255, g: 255, b: 255, a: 1.0 };
+
+    let message = {
+        'type': 'light',
+        'lights': [],
+        'numLights': 0
+    };
+
+    // we can't update all the lights by id yet because of poor song streaming
+    let minId = Math.round(colorValue/255 * numLedLightsPerStrip);
+    let maxId = Math.round(((colorValue+1)/255) * numLedLightsPerStrip);
+
+    for (let i = 0; i < numLedLightsPerStrip; i++) {
+        let bin = Math.round(i *  analyserFrequencyBinCount/ numLedLightsPerStrip);
+        let alpha = frequencyData[bin] / 255;
+        let colorForeground = { r:  rgbColor[0], g: rgbColor[1], b: rgbColor[2], a: alpha };
+        let color = normalColorBlend(whiteBackground, colorForeground);
+
+        if ((i >= minId) && (i <= maxId))
+            message.lights.push({
+                'id': i,
+                'r': color.r,
+                'g': color.g,
+                'b': color.b
+            });
+    }
+
+    message.numLights = message.lights.length;
+
+    wss.clients.forEach(function(client) {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify(message));
+        }
+    });
+}
+
+setInterval(draw, 1000/LightFps);
 
 const PythonShellOptions = {
     mode: 'text',
@@ -197,10 +279,47 @@ app.get('/api/playSong', function(req, res) {
             throttle.removeListener('data', writeChunk);
         }
 
-        let chunkSize = 1024*2;
+        let chunkSize = 1024*3;
         let burstSize = chunkSize * 2;
         throttle = new Throttle({bps:96 /8*1000, chunkSize});
         let throttleBurstFifo = new FIFO();
+
+        decoder = new lame.Decoder();
+        throttle.pipe(decoder);
+
+        decoder.on('format', function(format) {
+            isDrawProcessed = true;
+
+            let samplesPerLightFrame = Math.floor(format.sampleRate / LightFps);
+
+            analyser = new Analyser({
+                // Magnitude diapasone, in dB
+                minDecibels: -100,
+                maxDecibels: -30,
+
+                // Number of time samples to transform to frequency
+                fftSize: analyserFftSize,
+
+                // Number of frequencies, twice less than fftSize
+                frequencyBinCount: analyserFrequencyBinCount,
+
+                // Smoothing, or the priority of the old data over the new data
+                smoothingTimeConstant: 0.2,
+
+                // Number of channel to analyse
+                channel: 0,
+
+                // Size of time data to buffer
+                bufferSize: samplesPerLightFrame,
+
+                // Windowing function for fft, https://github.com/scijs/window-functions
+                applyWindow: function (sampleNumber, totalSamples) {
+                    return AnalyserWindowFunc(sampleNumber, totalSamples)
+                }
+            });
+
+            decoder.pipe(analyser);
+        });
 
         writeChunk = function(chunk) {
             if (throttleBurstFifo && (throttleBurstFifo.size < burstSize)) {
@@ -221,7 +340,8 @@ app.get('/api/playSong', function(req, res) {
         };
 
         throttle.on('data', writeChunk);
-        throttle.on('error', () => {}); // do nothing on error
+        throttle.on('error', () => { isDrawProcessed = false }); // do nothing
+        throttle.on('end', () => { isDrawProcessed = false }); // do nothing
 
         if (playSongHttpsRequest) {
             playSongHttpsRequest.abort();
@@ -338,9 +458,7 @@ wss.on('connection', function connection(ws, request) {
         let message = JSON.parse(messageJson);
 
         if (message.type === 'nodeInfo') {
-            let connectedAt = Math.floor(Date.now()/1000);
-
-            message.connectedAt = connectedAt;
+            message.connectedAt = Math.floor(Date.now()/1000);
 
             db.getNode({'macAddress': message.macAddress})
                 .then(function(row) {
