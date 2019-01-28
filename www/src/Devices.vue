@@ -19,6 +19,7 @@
 <script>
     import DeviceService from "./services/DeviceService"
     import PulseLoader from 'vue-spinner/src/PulseLoader.vue'
+    import NodeService from "./services/NodeService"
 
     export default {
         name: "Devices",
@@ -45,6 +46,7 @@
         },
         created() {
             this.get();
+            NodeService.broadcastConfig();
         },
         components: {
             DeviceService,

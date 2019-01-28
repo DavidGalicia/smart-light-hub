@@ -3,16 +3,12 @@ import Router from 'vue-router'
 import SetupAccount from '../SetupAccount'
 import Devices from '../Devices'
 import Device from '../Device'
+import Nodes from '../Nodes'
 
 Vue.use(Router);
 
 export default new Router({
     routes: [
-        {
-            path: '/setupAccount',
-            name: 'SetupAccount',
-            component: SetupAccount
-        },
         {
             path: '/',
             name: 'Devices',
@@ -22,6 +18,17 @@ export default new Router({
             path: '/devices/:id',
             name: 'Device',
             component: Device
-        }
+        },
+        {
+            path: '/setupAccount',
+            name: 'SetupAccount',
+            component: SetupAccount
+        },
+        {
+            path: '/nodes',
+            name: 'Nodes',
+            component: Nodes
+        },
+
     ]
 })

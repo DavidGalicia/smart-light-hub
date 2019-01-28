@@ -12,6 +12,7 @@ let os = require( 'os' );
 let Throttle = require('throttle');
 let FIFO = require('fifo-buffer');
 let {PythonShell} = require('python-shell');
+let db = require('./db');
 
 function toBase64(str)
 {
@@ -302,6 +303,25 @@ app.get('/api/broadcastConfig', function(req,res) {
     res.end(JSON.stringify({'resource': null, 'status': 'good', 'statusDetails': 'The config has been broadcasted.'}))
 });
 
+app.get('/api/getNodes', function(req,res) {
+    let result = {
+        resource: null,
+        status: 'good',
+        statusDetails: ''
+    };
+
+    db.getNodes()
+        .then(function(rows){
+            result.resource = rows;
+            res.end(JSON.stringify(result));
+        })
+        .catch(function(error) {
+            result.status = 'bad';
+            result.statusDetails = 'Failed to get nodes. Details: ' + error;
+            res.end(JSON.stringify(result));
+        });
+});
+
 server.listen(HttpPort, function() {
     console.log('Listening on *:' + HttpPort);
 });
@@ -312,8 +332,25 @@ wss.on('connection', function connection(ws, request) {
     const urlParts = url.parse(request.url, true);
     const ip = request.connection.remoteAddress;
 
-    ws.on('message', function incoming(message) {
-        console.log('received: %s', message);
+    ws.on('message', function incoming(messageJson) {
+        console.log('[ws] received: %s', messageJson);
+
+        let message = JSON.parse(messageJson);
+
+        if (message.type === 'nodeInfo') {
+            let connectedAt = Math.floor(Date.now()/1000);
+
+            message.connectedAt = connectedAt;
+
+            db.getNode({'macAddress': message.macAddress})
+                .then(function(row) {
+                    if (row) {
+                        db.updateNode(message)
+                    } else {
+                        db.addNode(message);
+                    }
+                })
+        }
     });
 
     //ws.send('hello client!');
