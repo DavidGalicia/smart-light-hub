@@ -120,10 +120,6 @@ app.use(cors());
 
 let server = http.createServer(app);
 
-app.get(['/', '/#/*'], function(req, res) {
-    res.sendFile(__dirname + '/index.html');
-});
-
 app.get('/api/performOauth', function(req, res) {
     let q = req.query;
     let args = [toBase64(JSON.stringify(q)), 'base64'];
@@ -441,6 +437,8 @@ app.get('/api/getNodes', function(req,res) {
             res.end(JSON.stringify(result));
         });
 });
+
+app.use(express.static('www'));
 
 server.listen(HttpPort, function() {
     console.log('Listening on *:' + HttpPort);
