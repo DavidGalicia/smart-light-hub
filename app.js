@@ -9,8 +9,7 @@ let WebSocket = require('ws');
 let dgram = require("dgram");
 let ipTools = require('ip');
 let os = require( 'os' );
-let Throttle = require('throttle');
-let FIFO = require('fifo-buffer');
+let BufferQueue = require('buffer-queue');
 let {PythonShell} = require('python-shell');
 let Analyser = require("audio-analyser");
 let AnalyserWindowFunc = require('window-function/rectangular');
@@ -24,11 +23,12 @@ function toBase64(str) {
 const HttpPort = 8000;
 const UdpBroadcastPort = 8001;
 
-let throttle = null;
-let writeChunk = null; // used by throttle
+let NumWebSocketClients = 0; // the number of clients currently connected
+let throttleBurstFifo = new BufferQueue();
+let isStreamDownloaded = false;
 let playSongHttpsRequest = null;
 let decoder = null;
-const LightFps = 3; // frames per second
+const LightFps = 1; // frames per second
 
 let isDrawProcessed = false;
 let analyser = null;
@@ -38,6 +38,7 @@ let rgbColor = [255,0,0]; // start off with red
 let decColor = 0;
 let incColor = decColor + 1;
 let colorValue = 0;
+let SongChunkSize = 1400;
 
 // adapted from:
 // https://gist.github.com/jamesotron/766994#file-rgb_spectrum-c-L22
@@ -72,7 +73,12 @@ function draw() {
     const numLedLightsPerStrip = 144;
     const whiteBackground  = { r: 255, g: 255, b: 255, a: 1.0 };
 
-    let message = {
+    let message1 = {
+        'type': 'light',
+        'lights': [],
+        'numLights': 0
+    };
+    let message2 = {
         'type': 'light',
         'lights': [],
         'numLights': 0
@@ -83,13 +89,21 @@ function draw() {
     let maxId = Math.round(((colorValue+1)/255) * numLedLightsPerStrip);
 
     for (let i = 0; i < numLedLightsPerStrip; i++) {
-        let bin = Math.round(i *  analyserFrequencyBinCount/ numLedLightsPerStrip);
+        let bin = Math.round(i * analyserFrequencyBinCount / numLedLightsPerStrip);
         let alpha = frequencyData[bin] / 255;
-        let colorForeground = { r:  rgbColor[0], g: rgbColor[1], b: rgbColor[2], a: alpha };
+        let colorForeground = {r: rgbColor[0], g: rgbColor[1], b: rgbColor[2], a: alpha};
         let color = normalColorBlend(whiteBackground, colorForeground);
 
-        if ((i >= minId) && (i <= maxId))
-            message.lights.push({
+        //if ((i >= minId) && (i <= maxId))
+        if (i < (numLedLightsPerStrip/2))
+            message1.lights.push({
+                'id': i,
+                'r': color.r,
+                'g': color.g,
+                'b': color.b
+            });
+        else
+            message2.lights.push({
                 'id': i,
                 'r': color.r,
                 'g': color.g,
@@ -97,16 +111,43 @@ function draw() {
             });
     }
 
-    message.numLights = message.lights.length;
+    message1.numLights = message1.lights.length;
+    message2.numLights = message2.lights.length;
 
     wss.clients.forEach(function(client) {
         if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify(message));
+            client.send(JSON.stringify(message1));
+            client.send(JSON.stringify(message2));
         }
     });
 }
 
 setInterval(draw, 1000/LightFps);
+
+function drainSongBuffer() {
+    if (throttleBurstFifo.length()) {
+        let chunk = null;
+
+        if (throttleBurstFifo.length() > SongChunkSize)
+            chunk = throttleBurstFifo.shift(SongChunkSize);
+        else
+            chunk = throttleBurstFifo.drain();
+
+        NumWebSocketClients = 0;
+        wss.clients.forEach(function each(client) {
+            if (client.readyState === WebSocket.OPEN)
+                client.send(chunk);
+                NumWebSocketClients++;
+        });
+    }
+
+    if (isStreamDownloaded && (!throttleBurstFifo.length())) {
+        decoder.end();
+        isDrawProcessed = false;
+    }
+}
+
+throttleBurstFifoTask = setInterval(drainSongBuffer, 150);
 
 const PythonShellOptions = {
     mode: 'text',
@@ -270,18 +311,15 @@ app.get('/api/playSong', function(req, res) {
     });
 
     let playSong = function(streamUrl) {
-        if (throttle) {
-            throttle.end();
-            throttle.removeListener('data', writeChunk);
+        if (decoder) {
+            decoder.end();
         }
-
-        let chunkSize = 1024*3;
-        let burstSize = chunkSize * 2;
-        throttle = new Throttle({bps:96 /8*1000, chunkSize});
-        let throttleBurstFifo = new FIFO();
+        throttleBurstFifo.empty();
+        isStreamDownloaded = false;
+        isDrawProcessed = false;
+        sendSoundChunkResizedEvent();
 
         decoder = new lame.Decoder();
-        throttle.pipe(decoder);
 
         decoder.on('format', function(format) {
             isDrawProcessed = true;
@@ -317,27 +355,8 @@ app.get('/api/playSong', function(req, res) {
             decoder.pipe(analyser);
         });
 
-        writeChunk = function(chunk) {
-            if (throttleBurstFifo && (throttleBurstFifo.size < burstSize)) {
-                throttleBurstFifo.enq(chunk);
-
-                if (throttleBurstFifo.size >= burstSize) {
-                    chunk = throttleBurstFifo.deq(throttleBurstFifo.size);
-                    throttleBurstFifo = null;
-                } else {
-                    return;
-                }
-            }
-
-            wss.clients.forEach(function each(client) {
-                if (client.readyState === WebSocket.OPEN)
-                    client.send(chunk);
-            });
-        };
-
-        throttle.on('data', writeChunk);
-        throttle.on('error', () => { isDrawProcessed = false }); // do nothing
-        throttle.on('end', () => { isDrawProcessed = false }); // do nothing
+        decoder.on('error', () => { }); // do nothing
+        decoder.on('end', () => { }); // do nothing
 
         if (playSongHttpsRequest) {
             playSongHttpsRequest.abort();
@@ -345,11 +364,16 @@ app.get('/api/playSong', function(req, res) {
 
         playSongHttpsRequest = httpsFR.get(streamUrl, (response) => {
             response.on('data', (chunk) => {
-                throttle.write(chunk);
+                decoder.write(chunk);
+                throttleBurstFifo.push(chunk);
             });
             response.on('end', () => {
-                throttle.end();
+                isStreamDownloaded = true;
             });
+            response.on('error', () => {
+                isStreamDownloaded = true;
+                decoder.end();
+            })
         });
 
         playSongHttpsRequest.on("error", (err) => {
@@ -419,6 +443,31 @@ app.get('/api/broadcastConfig', function(req,res) {
     res.end(JSON.stringify({'resource': null, 'status': 'good', 'statusDetails': 'The config has been broadcasted.'}))
 });
 
+app.get('/api/stopSong', function(req, res) {
+    let q = req.query;
+    let args = [toBase64(JSON.stringify(q)), 'base64'];
+    let options = {
+        mode: 'text',
+        pythonPath: PythonShellOptions.pythonPath,
+        scriptPath: PythonShellOptions.scriptPath,
+        args: args
+    };
+
+    if (playSongHttpsRequest) {
+        playSongHttpsRequest.abort();
+    }
+
+    isDrawProcessed = false;
+    throttleBurstFifo.empty();
+
+    wss.clients.forEach(function each(client) {
+        if (client.readyState === WebSocket.OPEN) {
+            let message = {'type': 'sound', 'action': 'stop'};
+            client.send(JSON.stringify(message));
+        }
+    });
+});
+
 app.get('/api/getNodes', function(req,res) {
     let result = {
         resource: null,
@@ -467,7 +516,36 @@ wss.on('connection', function connection(ws, request) {
                     }
                 })
         }
+
+        if (message.type === 'sound') {
+            const step = 50;
+
+            if (message.action === 'increaseChunkSize') {
+                if ((SongChunkSize + step) < message.maxChunkSize) {
+                    SongChunkSize += step;
+                }
+            }
+            if (message.action === 'decreaseChunkSize') {
+                if (SongChunkSize > step) {
+                    SongChunkSize -= step;
+                }
+            }
+
+            sendSoundChunkResizedEvent();
+
+            console.log('soundThrottle has set SongChunkSize to ' + SongChunkSize + ' for ' + NumWebSocketClients + ' node(s)');
+        }
     });
 
     //ws.send('hello client!');
 });
+
+function sendSoundChunkResizedEvent()
+{
+    wss.clients.forEach(function each(client) {
+        if (client.readyState === WebSocket.OPEN) {
+            let message = {'type': 'sound','action':'soundChunkResizeRequestServiced'};
+            client.send(JSON.stringify(message));
+        }
+    });
+}

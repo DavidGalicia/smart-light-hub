@@ -24,6 +24,15 @@
                 .catch(function (error) {
                     console.log(error);
                 });
+        },
+        stop() {
+            return Axios.get('http://127.0.0.1:8000/api/stopSong')
+                .then(function (response) {
+                    return response.data;
+                })
+                .catch(function (error) {
+                    console.log(error);
+                });
         }
     }
 </script>

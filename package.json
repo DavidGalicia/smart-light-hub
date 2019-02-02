@@ -3,16 +3,15 @@
   "version": "1.0.0",
   "dependencies": {
     "audio-analyser": "^1.0.2",
+    "buffer-queue": "^1.0.0",
     "color-blend": "^2.0.3",
     "cors": "^2.8.5",
     "express": "^4.16.4",
-    "fifo-buffer": "^1.0.0",
     "follow-redirects": "^1.6.0",
     "ip": "^1.1.5",
     "lame": "^1.2.4",
     "python-shell": "^1.0.6",
     "sqlite3": "^4.0.6",
-    "throttle": "^1.0.3",
     "window-function": "^2.1.0",
     "ws": "^6.1.3"
   }

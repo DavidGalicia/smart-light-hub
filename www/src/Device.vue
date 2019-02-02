@@ -12,6 +12,11 @@
             <template slot="album" slot-scope="data">{{ data.value }}</template>
             <template slot="title" slot-scope="data">{{ data.value }}</template>
             <template slot="artist" slot-scope="data">{{ data.value }}</template>
+            <template slot="action" slot-scope="data">
+                <b-button size="sm" class="mr-2">
+                    {{ data.item.isPlaying ? 'Stop' : 'Play' }}
+                </b-button>
+            </template>
         </b-table>
         <pulse-loader :loading="isSongsLoading" color="#3AB982" size="30px"></pulse-loader>
     </div>
@@ -38,21 +43,33 @@
                     .then((data) => {
                         this.isSongsLoading = false;
 
-                        this.songs = data.resource
+                        let songs = data.resource;
+
+                        for (let i = 0; i < songs.length; i++) {
+                            songs[i].isPlaying = false;
+                        }
+
+                        this.songs = songs;
                     });
             },
             onSongClicked(song) {
-                SongService.play(this.device.id, song.id)
-                    .then((data) => {
-                        this.playSongResult = data
-                    })
+                if (song.isPlaying) {
+                    song.isPlaying = false;
+                    SongService.stop();
+                } else {
+                    song.isPlaying = true;
+                    SongService.play(this.device.id, song.id)
+                        .then((data) => {
+                            this.playSongResult = data
+                        });
+                }
             }
         },
         data() {
             return {
                 device: { friendlyName: ''},
                 songs: [],
-                songsFields: ['album', 'title', 'artist'],
+                songsFields: ['album', 'title', 'artist','action'],
                 isSongsLoading: false,
                 playSongResult: {}
             }
