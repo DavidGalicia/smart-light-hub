@@ -2,6 +2,12 @@
 
 ## How to Setup Your Development Environment on Windows
 
+### Install Python 2
+
+Install Python 2.7.15 64bit (or better):
+
+https://www.python.org/downloads/windows/
+
 After the installation, make your system PATH contains lines like these:
 
 ```
@@ -9,12 +15,6 @@ C:\Python27
 C:\Python27\include
 C:\Python27\Scripts
 ```
-
-### Install Python 2
-
-Install Python 2.7.15 64bit (or better):
-
-https://www.python.org/downloads/windows/
 
 ### Install windows-build-tools
 Install windows-build-tools using npm:
@@ -59,3 +59,7 @@ Run this command:
 ```
 node app.js
 ```
+
+The server will run and print the url to the website.
+
+Note: Internet Explorer 11 is not supported.
