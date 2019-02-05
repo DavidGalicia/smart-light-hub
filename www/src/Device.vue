@@ -54,7 +54,7 @@
             },
             onSongClicked(song) {
                 for (let i = 0; i < this.songs.length; i++) {
-                    if (this.songs[i] !== song.id) {
+                    if (this.songs[i].id !== song.id) {
                         this.songs[i].isPlaying = false;
                     }
                 }
