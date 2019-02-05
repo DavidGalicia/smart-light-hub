@@ -38,7 +38,8 @@ let rgbColor = [255,0,0]; // start off with red
 let decColor = 0;
 let incColor = decColor + 1;
 let colorValue = 0;
-let SongChunkSize = 1400;
+let DefaultSongChunkSize = 1400;
+let SongChunkSize = DefaultSongChunkSize;
 
 // adapted from:
 // https://gist.github.com/jamesotron/766994#file-rgb_spectrum-c-L22
@@ -314,6 +315,7 @@ app.get('/api/playSong', function(req, res) {
         if (decoder) {
             decoder.end();
         }
+        SongChunkSize = DefaultSongChunkSize;
         throttleBurstFifo.empty();
         isStreamDownloaded = false;
         isDrawProcessed = false;

@@ -53,6 +53,12 @@
                     });
             },
             onSongClicked(song) {
+                for (let i = 0; i < this.songs.length; i++) {
+                    if (this.songs[i] !== song.id) {
+                        this.songs[i].isPlaying = false;
+                    }
+                }
+
                 if (song.isPlaying) {
                     song.isPlaying = false;
                     SongService.stop();
