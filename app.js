@@ -151,7 +151,7 @@ throttleBurstFifoTask = setInterval(drainSongBuffer, 150);
 
 const PythonShellOptions = {
     mode: 'text',
-    pythonPath: (os.platform() === 'linux') ? 'python' : 'C:\\Python27\\python.exe',
+    pythonPath: (os.platform() === 'linux') ? 'python' : 'python.exe',
     scriptPath: './scripts',
 };
 
