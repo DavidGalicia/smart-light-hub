@@ -15,6 +15,7 @@ let Analyser = require("audio-analyser");
 let AnalyserWindowFunc = require('window-function/rectangular');
 let db = require('./db');
 let normalColorBlend = require('color-blend').normal;
+const fs = require('fs');
 
 function toBase64(str) {
     return Buffer.from(str).toString('base64')
@@ -23,8 +24,12 @@ function toBase64(str) {
 const HttpPort = 8000;
 const UdpBroadcastPort = 8001;
 
+let SongsFolderPath = "./songs";
 let NumWebSocketClients = 0; // the number of clients currently connected
-let throttleBurstFifo = new BufferQueue();
+let defaultSongBufferSize = 20*1000*1000; // 20 MB buffer
+let songBuffer = Buffer.alloc(0);
+let songBufferBytesSent = 0; // bytes send to client
+let streamLength = 0; // length of stream in bytes
 let isStreamDownloaded = false;
 let playSongHttpsRequest = null;
 let decoder = null;
@@ -126,29 +131,32 @@ function draw() {
 setInterval(draw, 1000/LightFps);
 
 function drainSongBuffer() {
-    if (throttleBurstFifo.length()) {
+    let bytesQueued = streamLength - songBufferBytesSent;
+
+    if (bytesQueued > 0) {
         let chunk = null;
 
-        if (throttleBurstFifo.length() > SongChunkSize)
-            chunk = throttleBurstFifo.shift(SongChunkSize);
+        if (bytesQueued > SongChunkSize)
+            chunk = songBuffer.slice(songBufferBytesSent, songBufferBytesSent + SongChunkSize);
         else
-            chunk = throttleBurstFifo.drain();
+            chunk = songBuffer.slice(songBufferBytesSent, songBufferBytesSent + bytesQueued);
 
         NumWebSocketClients = 0;
         wss.clients.forEach(function each(client) {
             if (client.readyState === WebSocket.OPEN)
                 client.send(chunk);
                 NumWebSocketClients++;
+                songBufferBytesSent += chunk.length;
         });
     }
 
-    if (isStreamDownloaded && (!throttleBurstFifo.length())) {
+    if (isStreamDownloaded && (bytesQueued === 0)) {
         decoder.end();
         isDrawProcessed = false;
     }
 }
 
-throttleBurstFifoTask = setInterval(drainSongBuffer, 150);
+throttleBurstFifoTask = setInterval(drainSongBuffer, 110);
 
 const PythonShellOptions = {
     mode: 'text',
@@ -265,10 +273,40 @@ app.get('/api/getAllSongs', function(req, res) {
     PythonShell.run(command, options, function(error, cmdResults) {
         let joinedCmdResults = cmdResults.join('');
 
-        res.end(joinedCmdResults);
-
         if (error)
             console.log("Error: " + error);
+
+        joinedCmdResults = JSON.parse(joinedCmdResults);
+
+        for (let i = 0; i < joinedCmdResults.resource.length; i++) {
+            let song = joinedCmdResults.resource[i];
+            let dbSong = {id: song.id, album: song.album, title: song.title, artist: song.artist};
+
+            db.addSong(dbSong)
+                .catch(function() {
+                    db.updateSong(dbSong)
+                        .catch(function(error) {
+                            console.log("failed to save song info to database: " + error);
+                        })
+                });
+        }
+
+        let result = {
+            resource: null,
+            status: 'good',
+            statusDetails: ''
+        };
+
+        db.getSongs()
+            .then(function(rows){
+                result.resource = rows;
+                res.end(JSON.stringify(result));
+            })
+            .catch(function(error) {
+                result.status = 'bad';
+                result.statusDetails = 'Failed to get songs. Details: ' + error;
+                res.end(JSON.stringify(result));
+            });
     });
 });
 
@@ -311,12 +349,14 @@ app.get('/api/playSong', function(req, res) {
         }
     });
 
-    let playSong = function(streamUrl) {
+    let playSong = function(songId, streamUrl) {
         if (decoder) {
             decoder.end();
         }
         SongChunkSize = DefaultSongChunkSize;
-        throttleBurstFifo.empty();
+        songBuffer = Buffer.alloc(defaultSongBufferSize);
+        songBufferBytesSent = 0;
+        streamLength = 0;
         isStreamDownloaded = false;
         isDrawProcessed = false;
         sendSoundChunkResizedEvent();
@@ -364,22 +404,62 @@ app.get('/api/playSong', function(req, res) {
             playSongHttpsRequest.abort();
         }
 
-        playSongHttpsRequest = httpsFR.get(streamUrl, (response) => {
-            response.on('data', (chunk) => {
-                decoder.write(chunk);
-                throttleBurstFifo.push(chunk);
-            });
-            response.on('end', () => {
-                isStreamDownloaded = true;
-            });
-            response.on('error', () => {
-                isStreamDownloaded = true;
-                decoder.end();
-            })
-        });
+        let songPath = SongsFolderPath + "/" + songId;
 
-        playSongHttpsRequest.on("error", (err) => {
-            console.log("Error: " + err.message);
+        fs.exists(songPath, function(exists) {
+            if (exists) {
+                // read the song from the hard drive
+                console.log("reading song " + songId + " from hard drive ...");
+
+                let readStream = fs.createReadStream(songPath);
+
+                readStream.on('data', (chunk) => {
+                    decoder.write(chunk);
+                    chunk.copy(songBuffer, streamLength);
+                    streamLength += chunk.length;
+                });
+                readStream.on('end', () => {
+                    isStreamDownloaded = true;
+                });
+                readStream.on('error', () => {
+                    isStreamDownloaded = true;
+                    decoder.end();
+                })
+            } else {
+                // download the song
+                playSongHttpsRequest = httpsFR.get(streamUrl, (response) => {
+                    response.on('data', (chunk) => {
+                        decoder.write(chunk);
+                        chunk.copy(songBuffer, streamLength);
+                        streamLength += chunk.length;
+                    });
+                    response.on('end', () => {
+                        isStreamDownloaded = true;
+
+                        // save the song
+                        fs.open(songPath, 'w', function(error, fd) {
+                            if (error) {
+                                throw 'could not open ' + songPath + ': ' + error;
+                            }
+
+                            fs.write(fd, songBuffer, 0, streamLength, null, function(err) {
+                                if (err) throw 'error writing song ' + songId + ' to hard drive: ' +  err;
+                                fs.close(fd, function() {
+                                    console.log('wrote song ' + songId + ' to hard drive!');
+                                });
+                            });
+                        });
+                    });
+                    response.on('error', () => {
+                        isStreamDownloaded = true;
+                        decoder.end();
+                    })
+                });
+
+                playSongHttpsRequest.on("error", (err) => {
+                    console.log("Error: " + err.message);
+                });
+            }
         });
     };
 
@@ -394,15 +474,16 @@ app.get('/api/playSong', function(req, res) {
 
         console.log(output);
 
-        if (error)
+        if (error) {
             console.log("Error: " + error);
-        else
-            playSong(output.resource);
+        }
+
+        playSong(q.songId, output.resource);
     });
 });
 
 app.get('/api/broadcastConfig', function(req,res) {
-    let networkInterfaces = os.networkInterfaces( );
+    let networkInterfaces = os.networkInterfaces();
     let networkBroadcastAddress = "";
     let websocketServerIP = "";
 
@@ -460,7 +541,7 @@ app.get('/api/stopSong', function(req, res) {
     }
 
     isDrawProcessed = false;
-    throttleBurstFifo.empty();
+    songBufferBytesSent = streamLength; // stops drainSongBuffer() from sending more bytes
 
     wss.clients.forEach(function each(client) {
         if (client.readyState === WebSocket.OPEN) {
@@ -468,6 +549,8 @@ app.get('/api/stopSong', function(req, res) {
             client.send(JSON.stringify(message));
         }
     });
+
+    res.end(JSON.stringify({resource: null, status: 'good', statusDetails: 'Stopping song.'}));
 });
 
 app.get('/api/getNodes', function(req,res) {
@@ -520,7 +603,7 @@ wss.on('connection', function connection(ws, request) {
         }
 
         if (message.type === 'sound') {
-            const step = 50;
+            const step = 25;
 
             if (message.action === 'increaseChunkSize') {
                 if ((SongChunkSize + step) < message.maxChunkSize) {
@@ -550,4 +633,8 @@ function sendSoundChunkResizedEvent()
             client.send(JSON.stringify(message));
         }
     });
+}
+
+if (!fs.existsSync(SongsFolderPath)){
+    fs.mkdirSync(SongsFolderPath);
 }
