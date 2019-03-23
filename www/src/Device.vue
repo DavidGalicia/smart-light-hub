@@ -33,7 +33,9 @@
             getDevice(id) {
                 DeviceService.get(id)
                     .then((data) => {
-                        this.device = data.resource
+                        if (data.status === "good") {
+                            this.device = data.resource
+                        }
                     });
             },
             getSongs(deviceId) {
@@ -53,6 +55,7 @@
                     });
             },
             onSongClicked(song) {
+                console.log(song);
                 for (let i = 0; i < this.songs.length; i++) {
                     if (this.songs[i].id !== song.id) {
                         this.songs[i].isPlaying = false;
@@ -64,7 +67,10 @@
                     SongService.stop();
                 } else {
                     song.isPlaying = true;
-                    SongService.play(this.device.id, song.id)
+
+                    let deviceId = this.$route.params.id;
+
+                    SongService.play(deviceId, song.id)
                         .then((data) => {
                             this.playSongResult = data
                         });
@@ -81,8 +87,9 @@
             }
         },
         created() {
-            this.getDevice(this.$route.params.id);
-            this.getSongs(this.$route.params.id);
+            let deviceId = this.$route.params.id;
+            this.getDevice(deviceId);
+            this.getSongs(deviceId);
         },
         components: {
             SongService,

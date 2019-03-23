@@ -18,7 +18,7 @@
     },
     data () {
       return {
-        msg: 'Welcome to Your Vue.js App'
+        msg: 'Welcome to Node Leap - A Vue.js App'
       }
     }
   }

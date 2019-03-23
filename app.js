@@ -278,17 +278,19 @@ app.get('/api/getAllSongs', function(req, res) {
 
         joinedCmdResults = JSON.parse(joinedCmdResults);
 
-        for (let i = 0; i < joinedCmdResults.resource.length; i++) {
-            let song = joinedCmdResults.resource[i];
-            let dbSong = {id: song.id, album: song.album, title: song.title, artist: song.artist};
+        if (joinedCmdResults.resource) {
+            for (let i = 0; i < joinedCmdResults.resource.length; i++) {
+                let song = joinedCmdResults.resource[i];
+                let dbSong = {id: song.id, album: song.album, title: song.title, artist: song.artist};
 
-            db.addSong(dbSong)
-                .catch(function() {
-                    db.updateSong(dbSong)
-                        .catch(function(error) {
-                            console.log("failed to save song info to database: " + error);
-                        })
-                });
+                db.addSong(dbSong)
+                    .catch(function() {
+                        db.updateSong(dbSong)
+                            .catch(function(error) {
+                                console.log("failed to save song info to database: " + error);
+                            })
+                    });
+            }
         }
 
         let result = {
