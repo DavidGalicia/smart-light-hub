@@ -36,7 +36,10 @@
                         if (data.status === "good") {
                             this.device = data.resource
                         }
-                    });
+                    })
+                    .catch(() => {
+                        console.log("failed to get device!")
+                    })
             },
             getSongs(deviceId) {
                 this.isSongsLoading = true;
@@ -52,7 +55,10 @@
                         }
 
                         this.songs = songs;
-                    });
+                    })
+                    .catch(() => {
+                        console.log("failed to get songs!")
+                    })
             },
             onSongClicked(song) {
                 console.log(song);
