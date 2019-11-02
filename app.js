@@ -3,19 +3,20 @@ let http = require('http');
 let httpsFR = require('follow-redirects').https;
 let cors = require('cors');
 let url = require('url');
-let querystring = require("querystring");
 let lame = require('lame');
 let WebSocket = require('ws');
 let dgram = require("dgram");
 let ipTools = require('ip');
 let os = require( 'os' );
-let BufferQueue = require('buffer-queue');
 let {PythonShell} = require('python-shell');
-let Analyser = require("audio-analyser");
+let AudioAnalyser = require("audio-analyser");
 let AnalyserWindowFunc = require('window-function/rectangular');
 let db = require('./db');
-let normalColorBlend = require('color-blend').normal;
 const fs = require('fs');
+const { Worker } = require('worker_threads');
+
+const lightMessageWorker = new Worker('./LightMessageWorker.js');
+lightMessageWorker.on('message', sendLightMessage);
 
 function toBase64(str) {
     return Buffer.from(str).toString('base64')
@@ -39,91 +40,50 @@ let isDrawProcessed = false;
 let analyser = null;
 let analyserFftSize = 256;
 let analyserFrequencyBinCount = analyserFftSize / 2;
-let rgbColor = [255,0,0]; // start off with red
-let decColor = 0;
-let incColor = decColor + 1;
-let colorValue = 0;
 let DefaultSongChunkSize = 1400;
 let SongChunkSize = DefaultSongChunkSize;
 
-// adapted from:
-// https://gist.github.com/jamesotron/766994#file-rgb_spectrum-c-L22
-function updateRgbColor() {
-    if (decColor < 3) {
-        if (colorValue < 255) {
-            rgbColor[decColor] -= 1;
-            rgbColor[incColor] += 1;
-            colorValue++;
+let rgbColorState = {
+    color: [255, 0, 0], // start off with red
+    decColorComponent: 0,
+    incColorComponent: 1,
+};
+
+function updateRgbColorState(state) {
+    if (state.decColorComponent < 3) {
+        if (state.color[state.incColorComponent] < 255) {
+            state.color[state.incColorComponent] += 1;
+            state.color[state.decColorComponent] -= 1;
         } else {
-            colorValue = 0;
-            decColor += 1;
-            incColor = decColor === 2 ? 0 : decColor + 1;
+            state.decColorComponent += 1;
+            state.incColorComponent = state.decColorComponent === 2 ? 0 : state.decColorComponent + 1;
         }
     } else {
-        decColor = 0;
+        state.decColorComponent = 0;
     }
 }
 
 function draw() {
-    if (!isDrawProcessed) {
-        return;
+    if (isDrawProcessed && analyser) {
+        let frequencyData = new Uint8Array(analyserFrequencyBinCount);
+        analyser.getByteFrequencyData(frequencyData);
+
+        updateRgbColorState(rgbColorState);
+        const numLedLightsPerStrip = 60;
+
+        lightMessageWorker.postMessage({
+            rgbColorState: rgbColorState,
+            numLedLightsPerStrip: numLedLightsPerStrip,
+            frequencyData: frequencyData,
+            analyserFrequencyBinCount: analyserFrequencyBinCount
+        })
     }
-    if (!analyser) {
-        return;
-    }
+}
 
-    let frequencyData = new Uint8Array(analyserFrequencyBinCount);
-    analyser.getByteFrequencyData(frequencyData);
-
-    updateRgbColor();
-    const numLedLightsPerStrip = 144;
-    const whiteBackground  = { r: 255, g: 255, b: 255, a: 1.0 };
-
-    let message1 = {
-        'type': 'light',
-        'lights': [],
-        'numLights': 0
-    };
-    let message2 = {
-        'type': 'light',
-        'lights': [],
-        'numLights': 0
-    };
-
-    // we can't update all the lights by id yet because of poor song streaming
-    let minId = Math.round(colorValue/255 * numLedLightsPerStrip);
-    let maxId = Math.round(((colorValue+1)/255) * numLedLightsPerStrip);
-
-    for (let i = 0; i < numLedLightsPerStrip; i++) {
-        let bin = Math.round(i * analyserFrequencyBinCount / numLedLightsPerStrip);
-        let alpha = frequencyData[bin] / 255;
-        let colorForeground = {r: rgbColor[0], g: rgbColor[1], b: rgbColor[2], a: alpha};
-        let color = normalColorBlend(whiteBackground, colorForeground);
-
-        //if ((i >= minId) && (i <= maxId))
-        if (i < (numLedLightsPerStrip/2))
-            message1.lights.push({
-                'id': i,
-                'r': color.r,
-                'g': color.g,
-                'b': color.b
-            });
-        else
-            message2.lights.push({
-                'id': i,
-                'r': color.r,
-                'g': color.g,
-                'b': color.b
-            });
-    }
-
-    message1.numLights = message1.lights.length;
-    message2.numLights = message2.lights.length;
-
+function sendLightMessage(messageJson) {
     wss.clients.forEach(function(client) {
         if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify(message1));
-            client.send(JSON.stringify(message2));
+            client.send(messageJson);
         }
     });
 }
@@ -370,7 +330,7 @@ app.get('/api/playSong', function(req, res) {
 
             let samplesPerLightFrame = Math.floor(format.sampleRate / LightFps);
 
-            analyser = new Analyser({
+            analyser = new AudioAnalyser({
                 // Magnitude diapasone, in dB
                 minDecibels: -100,
                 maxDecibels: -30,
@@ -511,7 +471,7 @@ app.get('/api/broadcastConfig', function(req,res) {
         port: HttpPort,
         message: "Please setup a websocket connection to the hub."
     };
-    let udpMessageBuffer = new Buffer(JSON.stringify(udpMessage));
+    let udpMessageBuffer = Buffer.from(JSON.stringify(udpMessage));
     let udpClient = dgram.createSocket("udp4");
 
     udpClient.on('message', function(message, sender) {
@@ -574,7 +534,7 @@ app.get('/api/getNodes', function(req,res) {
         });
 });
 
-app.use(express.static('www'));
+app.use(express.static('www/dist'));
 
 server.listen(HttpPort, function() {
     console.log('Listening on *:' + HttpPort);
@@ -587,7 +547,7 @@ wss.on('connection', function connection(ws, request) {
     const ip = request.connection.remoteAddress;
 
     ws.on('message', function incoming(messageJson) {
-        console.log('[ws] received: %s', messageJson);
+        //console.log('[ws] received: %s', messageJson);
 
         let message = JSON.parse(messageJson);
 
@@ -620,7 +580,7 @@ wss.on('connection', function connection(ws, request) {
 
             sendSoundChunkResizedEvent();
 
-            console.log('soundThrottle has set SongChunkSize to ' + SongChunkSize + ' for ' + NumWebSocketClients + ' node(s)');
+            //console.log('soundThrottle has set SongChunkSize to ' + SongChunkSize + ' for ' + NumWebSocketClients + ' node(s)');
         }
     });
 

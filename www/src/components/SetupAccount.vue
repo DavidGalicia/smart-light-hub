@@ -28,7 +28,7 @@
 </template>
 
 <script>
-    import SetupAccountService from "./services/SetupAccountService";
+    import SetupAccountService from "../services/SetupAccountService";
     import PulseLoader from 'vue-spinner/src/PulseLoader.vue'
 
     export default {

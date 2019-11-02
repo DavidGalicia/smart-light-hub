@@ -21,7 +21,7 @@
 </template>
 
 <script>
-    import NodeService from "./services/NodeService"
+    import NodeService from "../services/NodeService"
     import PulseLoader from 'vue-spinner/src/PulseLoader.vue'
 
     export default {

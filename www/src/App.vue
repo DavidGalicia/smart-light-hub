@@ -8,13 +8,10 @@
 </template>
 
 <script>
-  import Devices from "./Devices"
-
   export default {
     name: 'app',
     // https://vuejs.org/v2/guide/components-registration.html
     components: {
-      Devices
     },
     data () {
       return {

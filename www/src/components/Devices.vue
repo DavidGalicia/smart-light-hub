@@ -17,9 +17,9 @@
 </template>
 
 <script>
-    import DeviceService from "./services/DeviceService"
+    import DeviceService from "../services/DeviceService"
     import PulseLoader from 'vue-spinner/src/PulseLoader.vue'
-    import NodeService from "./services/NodeService"
+    import NodeService from "../services/NodeService"
 
     export default {
         name: "Devices",
