@@ -12,7 +12,13 @@ parentPort.on('message', function(data) {
 
     for (let i = 0; i < data.numLedLightsPerStrip; i++) {
         let bin = Math.round(i * data.analyserFrequencyBinCount / data.numLedLightsPerStrip);
-        let alpha = data.frequencyData[bin] / 255;
+        let alpha = 1.0 - data.frequencyData[bin] / 255.0;
+        alpha = alpha * (1 + Math.sqrt(1 - alpha));
+        if (alpha > 1.0) {
+            alpha = 1.0
+        }
+
+        //console.log("bin: " + bin + ", val: " + data.frequencyData[bin] + ", alpha: " + alpha);
         let colorForeground = {
             r: data.rgbColorState.color[0],
             g: data.rgbColorState.color[1],

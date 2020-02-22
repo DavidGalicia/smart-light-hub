@@ -3,7 +3,6 @@ let http = require('http');
 let httpsFR = require('follow-redirects').https;
 let cors = require('cors');
 let url = require('url');
-let lame = require('lame');
 let WebSocket = require('ws');
 let dgram = require("dgram");
 let ipTools = require('ip');
@@ -11,12 +10,28 @@ let os = require( 'os' );
 let {PythonShell} = require('python-shell');
 let AudioAnalyser = require("audio-analyser");
 let AnalyserWindowFunc = require('window-function/rectangular');
+const BufferQueue = require('buffer-queue');
+let pcmQueue = new BufferQueue();
 let db = require('./db');
 const fs = require('fs');
 const { Worker } = require('worker_threads');
+const lame = require('lame');
 
 const lightMessageWorker = new Worker('./LightMessageWorker.js');
 lightMessageWorker.on('message', sendLightMessage);
+
+/** @type {Worker} */
+let mp3DecoderWorker = null
+
+let decoder = null;
+
+let savedFormat = null;
+
+let sendTask = null;
+function send() {
+    let chunk = pcmQueue.shift(savedFormat.sampleRate * savedFormat.channels * savedFormat.bitDepth / 8);
+    analyser.write(chunk);
+}
 
 function toBase64(str) {
     return Buffer.from(str).toString('base64')
@@ -33,15 +48,40 @@ let songBufferBytesSent = 0; // bytes send to client
 let streamLength = 0; // length of stream in bytes
 let isStreamDownloaded = false;
 let playSongHttpsRequest = null;
-let decoder = null;
-const LightFps = 1; // frames per second
-
-let isDrawProcessed = false;
-let analyser = null;
-let analyserFftSize = 256;
-let analyserFrequencyBinCount = analyserFftSize / 2;
+const LightFps = 5; // frames per second
 let DefaultSongChunkSize = 1400;
 let SongChunkSize = DefaultSongChunkSize;
+let isDrawProcessed = false;
+
+let analyserFftSize = 256;
+let analyserFrequencyBinCount = analyserFftSize / 2;
+let analyser = new AudioAnalyser({
+    // Magnitude diapason, in dB
+    minDecibels: -90,
+    maxDecibels: -10,
+
+    // Number of time samples to transform to frequency
+    fftSize: analyserFftSize,
+
+    // Number of frequencies, twice less than fftSize
+    frequencyBinCount: analyserFrequencyBinCount,
+
+    // Smoothing, or the priority of the old data over the new data
+    smoothingTimeConstant: 0.2,
+
+    // Number of channel to analyse
+    channel: 0,
+
+    // Size of time data to buffer
+    bufferSize: 44100,
+
+    // Windowing function for fft, https://github.com/scijs/window-functions
+    applyWindow: function (sampleNumber, totalSamples) {
+        return AnalyserWindowFunc(sampleNumber, totalSamples)
+    }
+});
+
+
 
 let rgbColorState = {
     color: [255, 0, 0], // start off with red
@@ -50,16 +90,12 @@ let rgbColorState = {
 };
 
 function updateRgbColorState(state) {
-    if (state.decColorComponent < 3) {
-        if (state.color[state.incColorComponent] < 255) {
-            state.color[state.incColorComponent] += 1;
-            state.color[state.decColorComponent] -= 1;
-        } else {
-            state.decColorComponent += 1;
-            state.incColorComponent = state.decColorComponent === 2 ? 0 : state.decColorComponent + 1;
-        }
+    if (state.color[state.incColorComponent] < 255) {
+        state.color[state.incColorComponent] += 1;
+        state.color[state.decColorComponent] -= 1;
     } else {
-        state.decColorComponent = 0;
+        state.decColorComponent = (state.decColorComponent < 2) ? state.decColorComponent + 1 : 0;
+        state.incColorComponent = (state.incColorComponent < 2) ? state.incColorComponent + 1 : 0;
     }
 }
 
@@ -69,7 +105,7 @@ function draw() {
         analyser.getByteFrequencyData(frequencyData);
 
         updateRgbColorState(rgbColorState);
-        const numLedLightsPerStrip = 60;
+        const numLedLightsPerStrip = 144;
 
         lightMessageWorker.postMessage({
             rgbColorState: rgbColorState,
@@ -106,12 +142,17 @@ function drainSongBuffer() {
             if (client.readyState === WebSocket.OPEN)
                 client.send(chunk);
                 NumWebSocketClients++;
-                songBufferBytesSent += chunk.length;
+
         });
+
+        songBufferBytesSent += chunk.length;
     }
 
     if (isStreamDownloaded && (bytesQueued === 0)) {
-        decoder.end();
+        if (decoder) {
+            decoder.end();
+        }
+
         isDrawProcessed = false;
     }
 }
@@ -312,55 +353,46 @@ app.get('/api/playSong', function(req, res) {
     });
 
     let playSong = function(songId, streamUrl) {
-        if (decoder) {
-            decoder.end();
-        }
         SongChunkSize = DefaultSongChunkSize;
         songBuffer = Buffer.alloc(defaultSongBufferSize);
         songBufferBytesSent = 0;
         streamLength = 0;
         isStreamDownloaded = false;
-        isDrawProcessed = false;
+        isDrawProcessed = true;
         sendSoundChunkResizedEvent();
+
+        if (decoder) {
+            decoder.end();
+            clearInterval(sendTask);
+        }
 
         decoder = new lame.Decoder();
 
         decoder.on('format', function(format) {
-            isDrawProcessed = true;
+            savedFormat = format;
+            console.log(format);
 
-            let samplesPerLightFrame = Math.floor(format.sampleRate / LightFps);
-
-            analyser = new AudioAnalyser({
-                // Magnitude diapasone, in dB
-                minDecibels: -100,
-                maxDecibels: -30,
-
-                // Number of time samples to transform to frequency
-                fftSize: analyserFftSize,
-
-                // Number of frequencies, twice less than fftSize
-                frequencyBinCount: analyserFrequencyBinCount,
-
-                // Smoothing, or the priority of the old data over the new data
-                smoothingTimeConstant: 0.2,
-
-                // Number of channel to analyse
-                channel: 0,
-
-                // Size of time data to buffer
-                bufferSize: samplesPerLightFrame,
-
-                // Windowing function for fft, https://github.com/scijs/window-functions
-                applyWindow: function (sampleNumber, totalSamples) {
-                    return AnalyserWindowFunc(sampleNumber, totalSamples)
-                }
+            decoder.on("data", function(data) {
+                pcmQueue.push(data);
             });
 
-            decoder.pipe(analyser);
+            sendTask = setInterval(send, 1000);
         });
 
-        decoder.on('error', () => { }); // do nothing
-        decoder.on('end', () => { }); // do nothing
+
+        // if (mp3DecoderWorker) {
+        //     mp3DecoderWorker.unref();
+        // }
+        //
+        // mp3DecoderWorker = new Worker('./MP3DecoderWorker.js');
+        // mp3DecoderWorker.on("message", function(chunk) {
+        //     console.log("chunk size: " + chunk.length);
+        //     analyser.write(chunk);
+        // });
+        // mp3DecoderWorker.on("error", function(error) {
+        //     console.error(error);
+        // });
+
 
         if (playSongHttpsRequest) {
             playSongHttpsRequest.abort();
@@ -485,7 +517,7 @@ app.get('/api/broadcastConfig', function(req,res) {
 
     udpClient.bind(UdpBroadcastPort);
 
-    res.end(JSON.stringify({'resource': null, 'status': 'good', 'statusDetails': 'The config has been broadcasted.'}))
+    res.send({'resource': null, 'status': 'good', 'statusDetails': 'The config has been broadcasted.'})
 });
 
 app.get('/api/stopSong', function(req, res) {
@@ -512,7 +544,7 @@ app.get('/api/stopSong', function(req, res) {
         }
     });
 
-    res.end(JSON.stringify({resource: null, status: 'good', statusDetails: 'Stopping song.'}));
+    res.send({resource: null, status: 'good', statusDetails: 'Stopping song.'});
 });
 
 app.get('/api/getNodes', function(req,res) {
@@ -530,7 +562,7 @@ app.get('/api/getNodes', function(req,res) {
         .catch(function(error) {
             result.status = 'bad';
             result.statusDetails = 'Failed to get nodes. Details: ' + error;
-            res.end(JSON.stringify(result));
+            res.send(result);
         });
 });
 
